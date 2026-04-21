@@ -19,6 +19,10 @@ const BeadsDirEnvVar = "BEADS_DIR"
 // PreferredJSONLNames defines the priority order for looking up beads data files.
 var PreferredJSONLNames = []string{"issues.jsonl", "beads.jsonl", "beads.base.jsonl"}
 
+// ErrJSONLEmptyButSQLiteExists is returned when JSONL files are empty but a SQLite database exists.
+// This typically means bd is using SQLite as the primary backend and JSONL hasn't been synced.
+var ErrJSONLEmptyButSQLiteExists = fmt.Errorf("JSONL files are empty but beads.db exists. Run 'bd sync --flush-only' to export data to JSONL")
+
 // GetBeadsDir returns the beads directory path, respecting BEADS_DIR env var.
 // If BEADS_DIR is set, it is used directly.
 // Otherwise, falls back to .beads in the given repoPath (or cwd if empty).
@@ -93,6 +97,10 @@ func FindJSONLPathWithWarnings(beadsDir string, warnFunc func(msg string)) (stri
 	}
 
 	if len(candidates) == 0 {
+		// No JSONL files found - check if SQLite database exists
+		if hasSQLiteDatabase(beadsDir) {
+			return "", ErrJSONLEmptyButSQLiteExists
+		}
 		return "", fmt.Errorf("no beads JSONL file found in %s", beadsDir)
 	}
 
@@ -121,6 +129,12 @@ func FindJSONLPathWithWarnings(beadsDir string, warnFunc func(msg string)) (stri
 		if info, err := os.Stat(path); err == nil && info.Size() > 0 {
 			return path, nil
 		}
+	}
+
+	// All JSONL files are empty - check if SQLite database exists
+	// This happens when bd uses SQLite as primary storage but JSONL hasn't been synced
+	if hasSQLiteDatabase(beadsDir) {
+		return "", ErrJSONLEmptyButSQLiteExists
 	}
 
 	// Last resort: return first candidate even if empty
@@ -274,4 +288,25 @@ func stripBOM(b []byte) []byte {
 		return b[3:]
 	}
 	return b
+}
+
+// hasSQLiteDatabase checks if a SQLite database file exists in the beads directory.
+// Returns true if beads.db or any *.db file exists with non-zero size.
+func hasSQLiteDatabase(beadsDir string) bool {
+	entries, err := os.ReadDir(beadsDir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if strings.HasSuffix(e.Name(), ".db") {
+			path := filepath.Join(beadsDir, e.Name())
+			if info, err := os.Stat(path); err == nil && info.Size() > 0 {
+				return true
+			}
+		}
+	}
+	return false
 }

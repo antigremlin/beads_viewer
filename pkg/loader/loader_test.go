@@ -1,6 +1,7 @@
 package loader_test
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -833,5 +834,63 @@ func TestGetBeadsDir_EnvVarEmpty_FallsBack(t *testing.T) {
 	}
 	if result != expected {
 		t.Errorf("Empty BEADS_DIR should fallback: got %s, want %s", result, expected)
+	}
+}
+
+func TestFindJSONLPath_EmptyJSONLWithSQLite_ReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	// Create empty JSONL file and SQLite database
+	os.WriteFile(filepath.Join(dir, "issues.jsonl"), []byte{}, 0644)
+	os.WriteFile(filepath.Join(dir, "beads.db"), []byte("SQLite format 3\000"), 0644)
+
+	_, err := loader.FindJSONLPath(dir)
+	if err == nil {
+		t.Fatal("Expected error when JSONL is empty but SQLite exists")
+	}
+	if !errors.Is(err, loader.ErrJSONLEmptyButSQLiteExists) {
+		t.Errorf("Expected ErrJSONLEmptyButSQLiteExists, got: %v", err)
+	}
+}
+
+func TestFindJSONLPath_NoJSONLWithSQLite_ReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	// Create only SQLite database, no JSONL files
+	os.WriteFile(filepath.Join(dir, "beads.db"), []byte("SQLite format 3\000"), 0644)
+
+	_, err := loader.FindJSONLPath(dir)
+	if err == nil {
+		t.Fatal("Expected error when no JSONL but SQLite exists")
+	}
+	if !errors.Is(err, loader.ErrJSONLEmptyButSQLiteExists) {
+		t.Errorf("Expected ErrJSONLEmptyButSQLiteExists, got: %v", err)
+	}
+}
+
+func TestFindJSONLPath_EmptyJSONLWithoutSQLite_ReturnsFile(t *testing.T) {
+	dir := t.TempDir()
+	// Create only empty JSONL file, no SQLite database
+	os.WriteFile(filepath.Join(dir, "issues.jsonl"), []byte{}, 0644)
+
+	path, err := loader.FindJSONLPath(dir)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if filepath.Base(path) != "issues.jsonl" {
+		t.Errorf("Expected issues.jsonl, got: %s", path)
+	}
+}
+
+func TestFindJSONLPath_NonEmptyJSONLWithSQLite_ReturnsFile(t *testing.T) {
+	dir := t.TempDir()
+	// Create non-empty JSONL file and SQLite database
+	os.WriteFile(filepath.Join(dir, "issues.jsonl"), []byte(`{"id":"1"}`), 0644)
+	os.WriteFile(filepath.Join(dir, "beads.db"), []byte("SQLite format 3\000"), 0644)
+
+	path, err := loader.FindJSONLPath(dir)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if filepath.Base(path) != "issues.jsonl" {
+		t.Errorf("Expected issues.jsonl, got: %s", path)
 	}
 }
